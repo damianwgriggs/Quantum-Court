@@ -1,0 +1,169 @@
+import time
+import requests
+import sys
+import json
+from web3 import Web3
+
+# --- 1. CONFIGURATION ---
+# Avalanche Fuji Testnet RPC
+AVAX_RPC_URL = "https://api.avax-test.network/ext/bc/C/rpc"
+web3 = Web3(Web3.HTTPProvider(AVAX_RPC_URL))
+
+# --- USER INPUT REQUIRED ---
+# paste your private key inside the quotes below
+PRIVATE_KEY = "YOURKEYHERE" 
+
+# Your Contract Address (Already inserted)
+CONTRACT_ADDRESS = "0x79168E0fe46183e4ECe90b172aed18F8814Dee35"
+
+# --- 2. SETUP ---
+if PRIVATE_KEY == "PASTE_YOUR_PRIVATE_KEY_HERE":
+    print("ERROR: You must update the PRIVATE_KEY variable in the script.")
+    sys.exit()
+
+account = web3.eth.account.from_key(PRIVATE_KEY)
+my_address = account.address
+
+# Your Specific ABI (Formatted for Python)
+contract_abi = [
+    {
+        "anonymous": False,
+        "inputs": [{"indexed": False, "internalType": "string", "name": "reason", "type": "string"}],
+        "name": "QuantumOracleSummoned",
+        "type": "event"
+    },
+    {
+        "inputs": [{"internalType": "uint256", "name": "quantumEntropy", "type": "uint256"}],
+        "name": "resolveDeadlock",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "simulateDeadlock",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "anonymous": False,
+        "inputs": [
+            {"indexed": False, "internalType": "uint256", "name": "quantumValue", "type": "uint256"},
+            {"indexed": False, "internalType": "string", "name": "result", "type": "string"}
+        ],
+        "name": "VerdictDelivered",
+        "type": "event"
+    }
+]
+
+contract = web3.eth.contract(address=CONTRACT_ADDRESS, abi=contract_abi)
+
+# --- 3. HELPER FUNCTIONS ---
+
+def print_header():
+    print("\n" + "="*60)
+    print("   QUANTUM JUDICIAL ORACLE (v2.0)")
+    print(f"   Listening on: Avalanche Fuji Testnet")
+    print(f"   Oracle Address: {my_address}")
+    print(f"   Target Contract: {CONTRACT_ADDRESS}")
+    print("="*60 + "\n")
+
+def get_quantum_entropy():
+    print("   [PHYSICS] Connecting to ANU Laser Lab (Australia)...")
+    try:
+        # Request 1 number (uint16) from the vacuum
+        url = "https://qrng.anu.edu.au/API/jsonI.php?length=1&type=uint16"
+        response = requests.get(url, timeout=10)
+        data = response.json()
+        
+        if data["success"]:
+            quantum_number = data["data"][0]
+            print(f"   [PHYSICS] Vacuum Fluctuation Captured: {quantum_number}")
+            return quantum_number
+        else:
+            print("   [ERROR] ANU API failed. Using fallback entropy.")
+            return int(time.time()) % 100
+    except Exception as e:
+        print(f"   [ERROR] Connection error: {e}")
+        return int(time.time()) % 100
+
+def deliver_verdict(quantum_number):
+    print("   [CHAIN]   Submitting Entropy to Smart Contract...")
+    
+    # 1. Build Transaction
+    try:
+        tx = contract.functions.resolveDeadlock(quantum_number).build_transaction({
+            'chainId': 43113,
+            'gas': 200000,
+            'gasPrice': web3.to_wei('30', 'gwei'),
+            'nonce': web3.eth.get_transaction_count(my_address),
+        })
+
+        # 2. Sign Transaction
+        signed_tx = web3.eth.account.sign_transaction(tx, private_key=PRIVATE_KEY)
+        
+        # 3. Send Transaction
+        tx_hash = web3.eth.send_raw_transaction(signed_tx.raw_transaction)
+        print(f"   [CHAIN]   Transaction Sent. Waiting for Receipt...")
+        
+        # 4. WAIT for the Receipt (The "Read Receipt")
+        receipt = web3.eth.wait_for_transaction_receipt(tx_hash)
+        
+        # 5. Decode the Logs to see what the Judge decided
+        logs = contract.events.VerdictDelivered().process_receipt(receipt)
+        
+        if logs:
+            args = logs[0]['args']
+            final_decision = args['result']
+            q_val = args['quantumValue']
+            
+            print("\n" + "-"*40)
+            print(f"   >>> VERDICT: {final_decision.upper()}")
+            print(f"   >>> BASED ON VALUE: {q_val}")
+            print(f"   >>> LOGIC: {q_val} is {'ODD (Guilty)' if q_val % 2 != 0 else 'EVEN (Innocent)'}")
+            print("-"*40 + "\n")
+        else:
+            print("   [?] Transaction confirmed, but no Verdict event found.")
+            
+    except Exception as e:
+        print(f"   [ERROR] Transaction failed: {e}")
+
+# --- 4. MAIN LOOP ---
+
+def main():
+    print_header()
+    
+    # Filter for the "Summoning" event
+    event_filter = contract.events.QuantumOracleSummoned.create_filter(from_block='latest')
+
+    print("   [...] Waiting for a Deadlock in the Court...")
+
+    while True:
+        try:
+            # Check for new events every 2 seconds
+            new_entries = event_filter.get_new_entries()
+            
+            for event in new_entries:
+                print(f"\n[!] ALERT: Judicial Deadlock Detected!")
+                print(f"    Reason: {event['args']['reason']}")
+                
+                # 1. Get Physics Data
+                entropy = get_quantum_entropy()
+                
+                # 2. Send to Chain & Print Result
+                deliver_verdict(entropy)
+                
+                print("   [...] Returning to watch mode...")
+            
+            time.sleep(2)
+            
+        except KeyboardInterrupt:
+            print("\n   [STOP] Oracle shutting down.")
+            sys.exit()
+        except Exception as e:
+            print(f"   [ERROR] Loop Error: {e}")
+            time.sleep(2)
+
+if __name__ == "__main__":
+    main()
